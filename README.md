@@ -49,9 +49,19 @@ pip install -e .  # For verl integration
 pip install wandb IPython matplotlib
 ```
 
----
+> [!NOTE] comment
+>
+> 这里我们直接激活之前配置的环境就可以了，不需要再重新创建环境。
+>
+> ```bash
+> conda activate zero
+> ```
 
 ## Data Preparation
+
+> [!NOTE] comment
+> - 这里已经为我们生成好data了，我们不需要再去生成；
+> - 如果希望看到如何生成的过程可以看[data](./data.md)
 
 You can directly use /data.
 

@@ -1,11 +1,11 @@
 """ Preprocess dataset for knights and knaves logic task """
 
 import os
-from datasets import Dataset, load_dataset
+from datasets import Dataset
 from tqdm import tqdm
-from verl.utils.hdfs_io import copy, makedirs
 import argparse
 import json
+from pathlib import Path
 
 def make_prefix(dp, template_type):
     quiz = dp['quiz']
@@ -15,72 +15,86 @@ def make_prefix(dp, template_type):
         prefix = f"""<|im_start|>system\nYou are a helpful assistant. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <think> </think> and<answer> </answer> tags, respectively, i.e., <think> reasoning process here </think><answer> answer here </answer>.  Now the user asks you to solve a logical reasoning problem. After thinking, when you finally reach a conclusion, clearly state the identity of each character within <answer> </answer> tags. i.e., <answer> (1) Zoey is a knight\n(2) ... </answer>.\n<|im_end|>\n<|im_start|>user\n{quiz}\n<|im_end|>\n<|im_start|>assistant\n<think>"""
     return prefix
 
+def make_map_fn(split, template_type):
+    def process_fn(example, idx):
+        question = make_prefix(example, template_type=template_type)
+        solution = {
+            "solution_text_format": example['solution_text_format'],
+            "statements": example['statements']
+        }
+        data = {
+            "data_source": 'kk_logic',
+            "prompt": [{
+                "role": "user",
+                "content": question,
+            }],
+            "ability": "logic",
+            "reward_model": {
+                "style": "rule",
+                "ground_truth": solution
+            },
+            "extra_info": {
+                'split': split,
+                'index': idx,
+            }
+        }
+        return data
+    return process_fn
+
+def gen_from_jsonl(path):
+    """Load custom JSONL dataset"""
+    with open(path) as f:
+        for line in f:
+            yield json.loads(line)
+
+def main():
+    template_type_list = ['base', 'qwen-instruct']
+
+    data_class_list = [
+      "clean", 
+      "flip_role", 
+      "perturbed_leaf", 
+      "perturbed_statement", 
+      "random_pair", 
+      "reorder_statement", 
+      "uncommon_name"  
+    ]
+
+    for template_type in template_type_list:
+        for data_class in data_class_list:
+
+            save_dir = f"./data/kk/{data_class}/{template_type}/"
+            data_path = f'./kk_data/data/train/{data_class}'
+            
+            # 使用pathlib获取所有jsonl文件
+            jsonl_files = [f.resolve() for f in Path(data_path).glob('*.jsonl')]
+            
+            for jsonl_file in jsonl_files:
+                file_name = jsonl_file.stem
+                people, numbers = file_name.split('_')
+                people_num = int(people.split('people')[1])
+                num_samples = int(numbers.split('num')[1])
+
+                jsonl_file = str(jsonl_file)
+
+                raw_dataset = Dataset.from_generator(gen_from_jsonl, gen_kwargs={'path': jsonl_file})
+                print(len(raw_dataset))
+
+                train_size = int(0.9 * len(raw_dataset))
+                train_dataset = raw_dataset.select(range(train_size))
+                test_dataset = raw_dataset.select(range(train_size, len(raw_dataset)))
+
+                train_dataset = train_dataset.map(function=make_map_fn('train', template_type), with_indices=True)
+                test_dataset = test_dataset.map(function=make_map_fn('test', template_type), with_indices=True)
+
+                # Create local directory if not exists
+                save_dataset_dir = Path(save_dir) / f'num{num_samples}' / f'{people_num}ppl'
+                save_dataset_dir.mkdir(parents=True, exist_ok=True)
+
+                train_dataset.to_parquet(save_dataset_dir / 'train.parquet')
+                test_dataset.to_parquet(save_dataset_dir / 'test.parquet')
+
+
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--local_dir', default='/home/t2vg-a100-G4-43/data/kk/instruct/3ppl')
-    parser.add_argument('--hdfs_dir', default=None)
-    parser.add_argument('--data_path', default='/home/t2vg-a100-G4-43/mem-kk-logic/kk_train_data/3ppl.jsonl')
-    parser.add_argument('--train_size', type=int, default=900)
-    parser.add_argument('--test_size', type=int, default=100)
-    parser.add_argument('--template_type', type=str, default='qwen-instruct')
+    main()
     
-    args = parser.parse_args()
-    
-    data_source = 'kk_logic'
-    TRAIN_SIZE = args.train_size
-    TEST_SIZE = args.test_size
-
-    # Load custom JSONL dataset
-    def gen_from_jsonl(path):
-        with open(path) as f:
-            for line in f:
-                yield json.loads(line)
-    
-    raw_dataset = Dataset.from_generator(gen_from_jsonl, gen_kwargs={'path': args.data_path})
-    print(len(raw_dataset))
-
-    assert len(raw_dataset) >= TRAIN_SIZE + TEST_SIZE
-    train_dataset = raw_dataset.select(range(TRAIN_SIZE))
-    test_dataset = raw_dataset.select(range(TRAIN_SIZE, TRAIN_SIZE + TEST_SIZE))
-
-    def make_map_fn(split):
-        def process_fn(example, idx):
-            question = make_prefix(example, template_type=args.template_type)
-            solution = {
-                "solution_text_format": example['solution_text_format'],
-                "statements": example['statements']
-            }
-            data = {
-                "data_source": data_source,
-                "prompt": [{
-                    "role": "user",
-                    "content": question,
-                }],
-                "ability": "logic",
-                "reward_model": {
-                    "style": "rule",
-                    "ground_truth": solution
-                },
-                "extra_info": {
-                    'split': split,
-                    'index': idx,
-                }
-            }
-            return data
-        return process_fn
-
-    train_dataset = train_dataset.map(function=make_map_fn('train'), with_indices=True)
-    test_dataset = test_dataset.map(function=make_map_fn('test'), with_indices=True)
-
-    local_dir = args.local_dir
-    hdfs_dir = args.hdfs_dir
-
-    # Create local directory if not exists
-    os.makedirs(os.path.expanduser(local_dir), exist_ok=True)
-
-    train_dataset.to_parquet(os.path.join(local_dir, 'train.parquet'))
-    test_dataset.to_parquet(os.path.join(local_dir, 'test.parquet'))
-
-    if hdfs_dir is not None:
-        makedirs(hdfs_dir)
-        copy(src=local_dir, dst=hdfs_dir)

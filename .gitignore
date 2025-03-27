@@ -111,3 +111,12 @@ tests/e2e/toy_examples/deepspeed/synchronous/output.txt
 
 # vim
 *.swp
+
+# generate data
+kk_data/data
+data/kk/flip_role
+data/kk/perturbed_leaf
+data/kk/perturbed_statement
+data/kk/random_pair
+data/kk/reorder_statement
+data/kk/uncommon_name
