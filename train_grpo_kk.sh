@@ -1,13 +1,13 @@
 set -x
 PROJECT_NAME=GRPO_Logic_KK
-MODEL_PATH=Qwen/Qwen2.5-1.5B
-EXPERIMENT_NAME=kk_3ppl-Qwen2.5-1.5B
+MODEL_PATH=Qwen/Qwen2.5-0.5B
+EXPERIMENT_NAME=kk_3ppl-Qwen2.5-0.5B
 DATA_DIR=data/kk/instruct/3ppl
 CKPT_DIR=/data1/linkdom/checkpoints
 N_GPUS=2
 ROLLOUT_TP_SIZE=2
 export VLLM_ATTENTION_BACKEND=XFORMERS
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=2,3
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     data.train_files=$DATA_DIR/train.parquet \
@@ -46,4 +46,4 @@ python3 -m verl.trainer.main_ppo \
     trainer.default_hdfs_dir=null \
     trainer.save_freq=10 \
     trainer.test_freq=10 \
-    trainer.total_epochs=5 $@ 2>&1 | tee grpo.log
+    trainer.total_epochs=5 $@ 2>&1 | tee grpo_kk.log
